@@ -1,6 +1,11 @@
 OneDrive SDK for PHP
 ====================
 
+[![Latest Stable Version](https://poser.pugx.org/krizalys/onedrive-php-sdk/v/stable)](https://packagist.org/packages/krizalys/onedrive-php-sdk)
+[![Build Status](https://travis-ci.org/krizalys/onedrive-php-sdk.svg?branch=master)](https://travis-ci.org/krizalys/onedrive-php-sdk)
+[![Code Coverage](https://codecov.io/gh/krizalys/onedrive-php-sdk/branch/master/graph/badge.svg)](https://codecov.io/gh/krizalys/onedrive-php-sdk)
+[![StyleCI](https://styleci.io/repos/23994489/shield?style=flat)](https://styleci.io/repos/23994489)
+
 OneDrive SDK for PHP is an open source library that allows [PHP][php]
 applications to interact programmatically with the [OneDrive API][onedrive-api].
 
@@ -12,10 +17,21 @@ Requirements
 
 Using the OneDrive SDK for PHP requires the following:
 
-* [PHP][php] 5.3 or newer
+* [PHP][php] 5.6 or newer
 * The [cURL extension for PHP][php-curl]
 * [Composer][composer] 1.0.0-alpha10 or newer
 * Basic PHP knowledge
+
+### Testing
+
+For development, you also require:
+
+* A OneDrive web application configured with `http://localhost:7777/` as its
+  redirect URL
+* A WebDriver server, for example the [Selenium's Java standalone
+  server][selenium-server-standalone]
+* A Chrome browser & ChromeDriver, and they must be usable by the WebDriver
+  server
 
 Installation
 ------------
@@ -37,15 +53,15 @@ OneDrive SDK for PHP.
 
 You also need to create a web page where users will get redirected after they
 successfully signed in to their OneDrive account using this SDK. Typically, this
-will page will be a PHP script where you will start to interact with the files
-and folders stored in their OneDrive account. The URL of this page is the
+page will be a PHP script where you will start to interact with the files and
+folders stored in their OneDrive account. The URL of this page is the
 *Callback URI* and will also be needed to configure the OneDrive SDK for PHP.
 
 Quick start
 -----------
 
 Once you got your *Client ID*, *Client secret* and *Callback URI*, you can get
-started using the OneDrive SDK for PHP in three steps.
+started using the OneDrive SDK for PHP in four steps.
 
 ### Step 1: get your dependencies through Composer
 
@@ -53,7 +69,7 @@ From the root of this repository, get the required dependencies using
 [Composer][composer]:
 
 ```
-$ composer install -n
+$ composer install -n --no-dev
 ```
 
 During the process, a `vendor/autoload.php` file will be created. It is
@@ -68,20 +84,22 @@ secret* and *Callback URI* in a configuration file. Let's call it
 
 ```php
 <?php
-/*
- * Your OneDrive client ID.
- */
-define('ONEDRIVE_CLIENT_ID', '<YOUR_CLIENT_ID>');
+return [
+    /*
+     * Your OneDrive client ID.
+     */
+    'ONEDRIVE_CLIENT_ID' => '<YOUR_CLIENT_ID>',
 
-/*
- * Your OneDrive client secret.
- */
-define('ONEDRIVE_CLIENT_SECRET', '<YOUR_CLIENT_SECRET>');
+    /*
+     * Your OneDrive client secret.
+     */
+    'ONEDRIVE_CLIENT_SECRET' => '<YOUR_CLIENT_SECRET>',
 
-/*
- * Your OneDrive callback URI.
- */
-define('ONEDRIVE_CALLBACK_URI', '<http://yourdomain.com/your-callback-uri.php>');
+    /*
+     * Your OneDrive callback URI.
+     */
+    'ONEDRIVE_CALLBACK_URI' => '<http://your.domain.com/your-callback.php>',
+];
 ?>
 ```
 
@@ -94,31 +112,32 @@ like (replace `/path/to` by the appropriate values):
 
 ```php
 <?php
-require_once '/path/to/onedrive-config.php';
+($config = include '/path/to/config.php') or die('Configuration file not found');
 require_once '/path/to/onedrive-php-sdk/vendor/autoload.php';
 
-session_start();
+use Krizalys\Onedrive\Client;
 
-// Clears the session and restarts the whole authentication process
-$_SESSION = array();
+// Instantiates a OneDrive client bound to your OneDrive application.
+$onedrive = new Client([
+    'client_id' => $config['ONEDRIVE_CLIENT_ID'],
+]);
 
-// Instantiates a OneDrive client bound to your OneDrive application
-$onedrive = new \Onedrive\Client(array(
-    'client_id' => ONEDRIVE_CLIENT_ID
-));
-
-// Gets a log in URL with sufficient privileges from the OneDrive API
-$url = $onedrive->getLogInUrl(array(
+// Gets a log in URL with sufficient privileges from the OneDrive API.
+$url = $onedrive->getLogInUrl([
     'wl.signin',
     'wl.basic',
     'wl.contacts_skydrive',
-    'wl.skydrive_update'
-), ONEDRIVE_CALLBACK_URI);
+    'wl.skydrive_update',
+], $config['ONEDRIVE_CALLBACK_URI']);
 
-// Persist the OneDrive client' state for next API requests
-$_SESSION['onedrive.client.state'] = $onedrive->getState();
+session_start();
 
-// Guide the user to the log in URL (you may also use an HTTP/JS redirect)
+// Persist the OneDrive client' state for next API requests.
+$_SESSION = [
+    'onedrive.client.state' => $onedrive->getState(),
+];
+
+// Guide the user to the log in URL (you may also use an HTTP/JS redirect).
 echo "<a href='$url'>Next step</a>";
 ?>
 ```
@@ -130,50 +149,81 @@ Microsoft account, and they are asked whether they agree to allow your
 application to access their OneDrive account.
 
 If they do, they are redirected back to your *Callback URI* and a code is passed
-in the query string of this URL. The script residing at this URL is responsible
-for obtaining an access token (from the code received) and should start like
-(replace `/path/to` by the appropriate values):
+in the query string of this URL. The script residing at this URL essentially:
+
+1. Instantiates a `Client` from your configuration and the state from previous
+instantiations
+2. Obtains an OAuth access token using `Client::obtainAccessToken()`
+passing it the code received
+3. May start interacting with the files and folders stored in their OneDrive
+account, or delegates this responsibility to other scripts instantiating a
+`Client` from the same state
+
+It typically looks like (replace `/path/to` by the appropriate values):
 
 ```php
 <?php
-require_once '/path/to/onedrive-config.php';
+($config = include '/path/to/config.php') or die('Configuration file not found');
 require_once '/path/to/onedrive-php-sdk/vendor/autoload.php';
+
+use Krizalys\Onedrive\Client;
 
 // If we don't have a code in the query string (meaning that the user did not
 // log in successfully or did not grant privileges requested), we cannot proceed
-// in obtaining an access token
+// in obtaining an access token.
 if (!array_key_exists('code', $_GET)) {
-    throw new Exception('code undefined in $_GET');
+    throw new \Exception('code undefined in $_GET');
 }
 
 session_start();
 
 // Attempt to load the OneDrive client' state persisted from the previous
-// request
+// request.
 if (!array_key_exists('onedrive.client.state', $_SESSION)) {
-    throw new Exception('onedrive.client.state undefined in $_SESSION');
+    throw new \Exception('onedrive.client.state undefined in $_SESSION');
 }
 
-$onedrive = new \Onedrive\Client(array(
-    'client_id' => ONEDRIVE_CLIENT_ID,
+$onedrive = new Client([
+    'client_id' => $config['ONEDRIVE_CLIENT_ID'],
 
     // Restore the previous state while instantiating this client to proceed in
-    // obtaining an access token
-    'state'     => $_SESSION['onedrive.client.state']
-));
+    // obtaining an access token.
+    'state' => $_SESSION['onedrive.client.state']
+]);
 
-// Obtain the token using the code received by the OneDrive API
-$onedrive->obtainAccessToken(ONEDRIVE_CLIENT_SECRET, $_GET['code']);
+// Obtain the token using the code received by the OneDrive API.
+$onedrive->obtainAccessToken($config['ONEDRIVE_CLIENT_SECRET'], $_GET['code']);
 
-// Persist the OneDrive client' state for next API requests
+// Persist the OneDrive client' state for next API requests.
 $_SESSION['onedrive.client.state'] = $onedrive->getState();
 
-// Past this point, you can start using file/folder functions from the SDK
+// Past this point, you can start using file/folder functions from the SDK.
 ?>
 ```
 
 For details about classes and methods available, see the [project
 page][ondrive-php-sdk] on [Krizalys][krizalys].
+
+Testing
+-------
+
+To run the functional test suite:
+
+1. Set your application configuration at `test/functional/config.php` ;
+2. Run your WebDriver server, for example:
+
+```
+java -jar selenium-server-standalone-3.8.1.jar
+```
+
+3. Run the functional test (it assumes that your Selenium WebDriver is listening
+   on port 4444):
+
+```
+vendor/bin/phpunit -c test/functional
+```
+
+4. Repeat steps 4 to 5 as needed.
 
 Examples
 --------
@@ -191,8 +241,8 @@ The example files provided with the OneDrive SDK for PHP are deployed on a
 [demo website][ondrive-php-sdk-demo] for live demonstration purposes. A OneDrive
 account is needed to try out this demonstration.
 
-If you are using PHP 5.4 or later, you can try the examples on your own machine
-using PHP's built-in web server:
+You can also try the examples on your own machine using PHP's built-in web
+server:
 
 ```
 $ php -S yourdomain.com -t example
@@ -213,14 +263,15 @@ Credits
 
 The OneDrive SDK for PHP is developed and maintained by Christophe Vidal.
 
-[php]:                  http://php.net/
-[onedrive-api]:         http://msdn.microsoft.com/en-us/library/hh826521.aspx
-[php-curl]:             http://php.net/manual/en/book.curl.php
-[composer]:             https://getcomposer.org/
-[live-login]:           https://login.live.com/
-[live-apps]:            https://account.live.com/developers/applications/index
-[live-newapp]:          https://account.live.com/developers/applications/create
-[ondrive-php-sdk]:      http://www.krizalys.com/software/onedrive-php-sdk
-[krizalys]:             http://www.krizalys.com/
-[ondrive-php-sdk-demo]: http://demo.krizalys.com/onedrive-php-sdk/example/
-[gpl]:                  http://www.gnu.org/copyleft/gpl.html
+[php]:                        http://php.net/
+[onedrive-api]:               http://msdn.microsoft.com/en-us/library/hh826521.aspx
+[php-curl]:                   http://php.net/manual/en/book.curl.php
+[composer]:                   https://getcomposer.org/
+[selenium-server-standalone]: http://selenium-release.storage.googleapis.com/index.html
+[live-login]:                 https://login.live.com/
+[live-apps]:                  https://account.live.com/developers/applications/index
+[live-newapp]:                https://account.live.com/developers/applications/create
+[ondrive-php-sdk]:            http://www.krizalys.com/software/onedrive-php-sdk
+[krizalys]:                   http://www.krizalys.com/
+[ondrive-php-sdk-demo]:       http://demo.krizalys.com/onedrive-php-sdk/example/
+[gpl]:                        http://www.gnu.org/copyleft/gpl.html

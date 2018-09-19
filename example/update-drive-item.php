@@ -20,39 +20,33 @@ try {
 
     $properties = [];
 
-    if (!empty($_GET['id'])) {
-        $properties['id'] = $_GET['id'];
+    if (!empty($_GET['name'])) {
+        $properties['name'] = $_GET['name'];
     }
 
-    if (!empty($_GET['destination_id'])) {
-        $properties['destination_id'] = $_GET['destination_id'];
+    if (!empty($_GET['description'])) {
+        $properties['description'] = $_GET['description'];
     }
 
-    $id   = $_GET['id'];
-    $file = $onedrive->fetchDriveItem($id);
-
-    if ($file->isFolder()) {
-        throw new \Exception('OneDrive does not support copying folders');
-    }
-
-    $file->copy($_GET['destination_id']);
-    $status = sprintf('<p class=bg-success>The file <em>%s</em> has been copied using the <code>File::copy</code> method.</p>', htmlspecialchars($id));
+    $id = $_GET['id'];
+    $onedrive->updateDriveItem($id, $properties);
+    $status = sprintf('<p class=bg-success>The drive item <em>%s</em> has been updated in your OneDrive account using the <code>Client::updateDriveItem</code> method.</p>', htmlspecialchars($id));
 } catch (\Exception $e) {
-    $status = sprintf('<p class=bg-danger>The file <em>%s</em> has <strong>not</strong> been copied using the <code>File::copy</code> method. Reason: <cite>%s</cite></p>', htmlspecialchars($id), htmlspecialchars($e->getMessage()));
+    $status = sprintf('<p class=bg-danger>The drive item <em>%s</em> has <strong>not</strong> been updated in your OneDrive account using the <code>Client::updateDriveItem</code> method. Reason: <cite>%s</cite></p>', htmlspecialchars($id), htmlspecialchars($e->getMessage()));
 }
 ?>
 <!DOCTYPE html>
 <html lang=en dir=ltr>
     <head>
         <meta charset=utf-8>
-        <title>Copying a OneDrive file – Demonstration of the OneDrive SDK for PHP</title>
+        <title>Updating a OneDrive drive item – Demonstration of the OneDrive SDK for PHP</title>
         <link rel=stylesheet href=//ajax.aspnetcdn.com/ajax/bootstrap/3.2.0/css/bootstrap.min.css>
         <link rel=stylesheet href=//ajax.aspnetcdn.com/ajax/bootstrap/3.2.0/css/bootstrap-theme.min.css>
         <meta name=viewport content="width=device-width, initial-scale=1">
     </head>
     <body>
         <div class=container>
-            <h1>Copying a OneDrive file</h1>
+            <h1>Updating a OneDrive drive item</h1>
             <?php if (null !== $status) echo $status ?>
             <p><a href=app.php>Back to the examples</a></p>
         </div>
